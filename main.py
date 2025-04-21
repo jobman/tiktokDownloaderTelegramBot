@@ -20,12 +20,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if match:
             tiktok_url = match.group(0)
             try:
-
                 # Получаем данные от TikTok
                 tiktok_bytes = get_bytes(tiktok_url)
                 
                 # Удаляем оригинальное сообщение
                 await update.message.delete()
+                
+                # Определяем идентификатор отправителя
+                sender = update.message.from_user
+                sender_name = (sender.full_name or sender.username or str(sender.id))
                 
                 if isinstance(tiktok_bytes, list):
                     # Если вернулся список (фотографии)
@@ -34,14 +37,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         media = [InputMediaPhoto(photo) for photo in tiktok_bytes]
                         await context.bot.send_media_group(
                             chat_id=update.message.chat_id,
-                            media=media
+                            media=media,
+                            caption=f"Отправлено: {sender_name}" if media else None
                         )
                     else:
                         # Отправляем фотографии по одной, если их больше 10
                         for photo in tiktok_bytes:
                             await context.bot.send_photo(
                                 chat_id=update.message.chat_id,
-                                photo=photo
+                                photo=photo,
+                                caption=f"Отправлено: {sender_name}"
                             )
                 else:
                     # Если вернулось видео (байты)
@@ -49,13 +54,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_video(
                         chat_id=update.message.chat_id,
                         video=video_bytes,
-                        supports_streaming=True
+                        supports_streaming=True,
+                        caption=f"Отправлено: {sender_name}"
                     )
             except Exception as e:
                 # В случае ошибки отправляем сообщение об ошибке
+                sender = update.message.from_user
+                sender_name = (sender.full_name or sender.username or str(sender.id))
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text=f"Ошибка при обработке TikTok ссылки: {str(e)}"
+                    text=f"Ошибка при обработке TikTok ссылки: {str(e)}\nОтправлено: {sender_name}"
                 )
 
 def main():
