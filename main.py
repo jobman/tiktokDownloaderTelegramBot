@@ -12,7 +12,7 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Регулярное выражение для поиска ссылок на TikTok
-TIKTOK_PATTERN = r"(https?://(www\.)?(vm\.)?tiktok\.com/[^\s]+)"
+TIKTOK_PATTERN = r"(https?://(www\.|vm\.|vt\.)?tiktok\.com/[^\s]+)"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что сообщение из группы и содержит текст
