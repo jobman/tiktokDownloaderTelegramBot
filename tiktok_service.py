@@ -101,4 +101,4 @@ def get_bytes(video_url):
         return tt_video.content
 
 if __name__ == "__main__":
-    print(len(get_bytes("https://www.tiktok.com/@asya05283/video/7494392097303219511?is_from_webapp=1&sender_device=pc")))
+    print(len(get_bytes("https://vm.tiktok.com/ZMBWpLNH2/")))

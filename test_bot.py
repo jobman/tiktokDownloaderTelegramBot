@@ -43,7 +43,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_media_group(
                             chat_id=update.message.chat_id,
                             media=media,
-                            caption=f"by: {sender_name}" if media else None
+                            caption=f"Отправлено: {sender_name}" if media else None
                         )
                     else:
                         # Отправляем фотографии по одной, если их больше 10
@@ -51,7 +51,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_photo(
                                 chat_id=update.message.chat_id,
                                 photo=photo,
-                                caption=f"by: {sender_name}"
+                                caption=f"Отправлено: {sender_name}"
                             )
                 else:
                     # Если вернулось видео (байты)
@@ -60,12 +60,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         chat_id=update.message.chat_id,
                         video=video_bytes,
                         supports_streaming=True,
-                        caption=f"by: {sender_name}"
+                        caption=f"Отправлено: {sender_name}"
                     )
             except Exception as e:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text=f"Ошибка при обработке TikTok ссылки: {str(e)}\nby: {sender_name}"
+                    text=f"Ошибка при обработке TikTok ссылки: {str(e)}\nОтправлено: {sender_name}"
                 )
         
         elif instagram_match:
@@ -82,12 +82,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=update.message.chat_id,
                     video=InputFile(video_bytes, filename="instagram_video.mp4"),
                     supports_streaming=True,
-                    caption=f"by: {sender_name}"
+                    caption=f"Отправлено: {sender_name}"
                 )
             except Exception as e:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
-                    text=f"Ошибка при обработке Instagram ссылки: {str(e)}\nby: {sender_name}"
+                    text=f"Ошибка при обработке Instagram ссылки: {str(e)}\nОтправлено: {sender_name}"
                 )
 
 async def error_handler(update: Update, context):
