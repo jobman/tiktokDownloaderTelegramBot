@@ -2,3 +2,4 @@ pyktok
 python-telegram-bot
 python-dotenv
 instaloader
+yt-dlp
