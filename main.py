@@ -3,6 +3,7 @@ from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import re
 from tiktok_service import get_bytes as get_tiktok_bytes
 from instagram_service import get_instagram_video
+from youtube_service import get_youtube_video
 from dotenv import load_dotenv
 import os
 from telegram.error import NetworkError
@@ -15,6 +16,7 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 # Регулярные выражения для поиска ссылок
 TIKTOK_PATTERN = r"(https?://(www\.|vm\.|vt\.)?tiktok\.com/[^\s]+)"
 INSTAGRAM_PATTERN = r"(https?://(www\.)?instagram\.com/(p|reel)/[^\s]+)"
+YOUTUBE_PATTERN = r"(https?://(www\.)?youtube\.com/shorts/[^\s]+)"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что сообщение из группы и содержит текст
@@ -22,9 +24,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sender = update.message.from_user
         sender_name = (sender.full_name or sender.username or str(sender.id))
         
-        # Ищем ссылку на TikTok или Instagram
+        # Ищем ссылку на TikTok, Instagram или YouTube
         tiktok_match = re.search(TIKTOK_PATTERN, update.message.text)
         instagram_match = re.search(INSTAGRAM_PATTERN, update.message.text)
+        youtube_match = re.search(YOUTUBE_PATTERN, update.message.text)
         
         if tiktok_match:
             tiktok_url = tiktok_match.group(0)
@@ -89,6 +92,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=update.message.chat_id,
                     text=f"Ошибка при обработке Instagram ссылки: {str(e)}\n{sender_name}"
                 )
+        
+        elif youtube_match:
+            youtube_url = youtube_match.group(0)
+            try:
+                # Получаем видео из YouTube
+                video_bytes = get_youtube_video(youtube_url)
+                
+                # Удаляем оригинальное сообщение
+                await update.message.delete()
+                
+                # Отправляем видео
+                await context.bot.send_video(
+                    chat_id=update.message.chat_id,
+                    video=InputFile(video_bytes, filename="youtube_video.mp4"),
+                    supports_streaming=True,
+                    caption=f"{sender_name}"
+                )
+            except Exception as e:
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"Ошибка при обработке YouTube ссылки: {str(e)}\n{sender_name}"
+                )
+
 
 async def error_handler(update: Update, context):
     """Custom error handler to suppress stack traces and print clean error messages."""
