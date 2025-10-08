@@ -7,7 +7,7 @@ def get_youtube_video(url):
         raise ValueError("The provided URL is not a YouTube Shorts link.")
 
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'bestvideo+bestaudio/best',
         'outtmpl': '%(id)s.%(ext)s',
         'quiet': True,
     }
