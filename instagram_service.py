@@ -4,6 +4,7 @@ import os
 import shutil
 import time
 import logging
+import yt_dlp
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,6 +18,38 @@ def get_shortcode_from_url(url):
         return match.group(1)
     else:
         raise ValueError("Невалидная ссылка на Instagram")
+
+def get_instagram_video_by_yt_dlp(url):
+    """Downloads an Instagram video using yt-dlp and returns its bytes."""
+    output_filename = 'downloaded_instagram_video'
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': output_filename,
+        'quiet': True,
+    }
+
+    downloaded_file = None
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
+    except Exception:
+        # The download might have failed, but the file might still be there.
+        pass
+
+    # Find the downloaded file, since we don't know the extension
+    for f in os.listdir('.'):
+        if f.startswith(output_filename):
+            downloaded_file = f
+            break
+
+    if downloaded_file:
+        with open(downloaded_file, 'rb') as f:
+            video_bytes = f.read()
+        
+        os.remove(downloaded_file)
+        return video_bytes
+    else:
+        raise Exception("Failed to download video with yt-dlp.")
 
 def get_instagram_video(url, username=None, password=None):
     """Скачивает видео из Instagram и возвращает его байты."""
@@ -85,18 +118,6 @@ def get_instagram_video(url, username=None, password=None):
         
         raise FileNotFoundError("Видеофайл не найден в папке поста")
             
-    except instaloader.exceptions.LoginRequiredException:
-        logger.error("Требуется авторизация для доступа к этому контенту")
-        raise Exception("Требуется авторизация для доступа к этому контенту")
-    except instaloader.exceptions.InvalidArgumentException:
-        logger.error("Неверная ссылка или shortcode")
-        raise Exception("Неверная ссылка или shortcode")
-    except instaloader.exceptions.ConnectionException as e:
-        logger.error(f"Ошибка соединения: {e}")
-        raise Exception(f"Ошибка соединения: {e}")
-    except FileNotFoundError as e:
-        logger.error(f"Видеофайл не найден: {e}")
-        raise Exception(f"Видеофайл не найден: {e}")
-    except Exception as e:
-        logger.error(f"Ошибка при скачивании видео: {e}")
-        raise Exception(f"Ошибка при скачивании видео: {e}")
+    except Exception:
+        logger.error("Instaloader failed, falling back to yt-dlp")
+        return get_instagram_video_by_yt_dlp(url)

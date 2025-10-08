@@ -5,6 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import browser_cookie3
+import yt_dlp
+import os
 
 
 url_regex = '(?<=\.com/)(.+?)(?=\?|$)'
@@ -57,48 +59,82 @@ def alt_get_tiktok_json(video_url,browser_name=None):
         return
     return tt_json
 
+def get_tiktok_video_by_yt_dlp(url):
+    """Downloads a TikTok video using yt-dlp and returns its bytes."""
+    output_filename = 'downloaded_tiktok_video'
+    ydl_opts = {
+        'format': 'best',
+        'outtmpl': output_filename,
+        'quiet': True,
+    }
+
+    downloaded_file = None
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
+    except Exception:
+        # The download might have failed, but the file might still be there.
+        pass
+
+    # Find the downloaded file, since we don't know the extension
+    for f in os.listdir('.'):
+        if f.startswith(output_filename):
+            downloaded_file = f
+            break
+
+    if downloaded_file:
+        with open(downloaded_file, 'rb') as f:
+            video_bytes = f.read()
+        
+        os.remove(downloaded_file)
+        return video_bytes
+    else:
+        raise Exception("Failed to download video with yt-dlp.")
 
 def get_bytes(video_url):
-    browser_name="firefox"
-    if 'cookies' not in globals() and browser_name is None:
-        raise ValueError('No browser defined for cookie extraction. We strongly recommend you run \'specify_browser\', which takes as its sole argument a string representing a browser installed on your system, e.g. "chrome," "firefox," "edge," etc.')
+    try:
+        browser_name="firefox"
+        if 'cookies' not in globals() and browser_name is None:
+            raise ValueError('No browser defined for cookie extraction. We strongly recommend you run \'specify_browser\', which takes as its sole argument a string representing a browser installed on your system, e.g. "chrome," "firefox," "edge," etc.')
 
-    tt_json = get_tiktok_json(video_url,browser_name)
+        tt_json = get_tiktok_json(video_url,browser_name)
 
-    if tt_json is not None:
-        video_id = list(tt_json['ItemModule'].keys())[0]
-        if 'imagePost' in tt_json['ItemModule'][video_id]:
-            bytes_list = []
-            for slide in tt_json['ItemModule'][video_id]['imagePost']['images']:
-                tt_video_url = slide['imageURL']['urlList'][0]
+        if tt_json is not None:
+            video_id = list(tt_json['ItemModule'].keys())[0]
+            if 'imagePost' in tt_json['ItemModule'][video_id]:
+                bytes_list = []
+                for slide in tt_json['ItemModule'][video_id]['imagePost']['images']:
+                    tt_video_url = slide['imageURL']['urlList'][0]
+                    headers['referer'] = 'https://www.tiktok.com/'
+                    # include cookies with the video request
+                    tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
+                    bytes_list.append(tt_video.content)
+                return bytes_list
+            else:
+                try:
+                    tt_video_url = tt_json['ItemModule'][video_id]['video']['downloadAddr']
+                except:
+                    tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['downloadAddr']
                 headers['referer'] = 'https://www.tiktok.com/'
                 # include cookies with the video request
                 tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
-                bytes_list.append(tt_video.content)
-            return bytes_list
+            return tt_video.content
+
         else:
+            tt_json = alt_get_tiktok_json(video_url,browser_name)
+
             try:
-                tt_video_url = tt_json['ItemModule'][video_id]['video']['downloadAddr']
+                tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['playAddr']
+                if tt_video_url == '':
+                    raise
             except:
                 tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['downloadAddr']
             headers['referer'] = 'https://www.tiktok.com/'
             # include cookies with the video request
             tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
-        return tt_video.content
-
-    else:
-        tt_json = alt_get_tiktok_json(video_url,browser_name)
-
-        try:
-            tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['playAddr']
-            if tt_video_url == '':
-                raise
-        except:
-            tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['downloadAddr']
-        headers['referer'] = 'https://www.tiktok.com/'
-        # include cookies with the video request
-        tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
-        return tt_video.content
+            return tt_video.content
+    except Exception:
+        return get_tiktok_video_by_yt_dlp(video_url)
 
 if __name__ == "__main__":
     print(len(get_bytes("https://vm.tiktok.com/ZMBWpLNH2/")))
