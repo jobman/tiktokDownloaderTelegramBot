@@ -10,6 +10,9 @@ def get_youtube_video(url):
         'format': 'bestvideo+bestaudio/best',
         'outtmpl': '%(id)s.%(ext)s',
         'quiet': True,
+        'retries': 3,
+        'fragment_retries': 3,
+        'socket_timeout': 30,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

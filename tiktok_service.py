@@ -7,6 +7,8 @@ import json
 import browser_cookie3
 import yt_dlp
 import os
+import time
+from requests.exceptions import Timeout as RequestsTimeout, RequestException
 
 
 url_regex = '(?<=\.com/)(.+?)(?=\?|$)'
@@ -27,7 +29,7 @@ def get_tiktok_json(video_url,browser_name=None):
     tt = requests.get(video_url,
                       headers=headers,
                       cookies=cookies,
-                      timeout=20)
+                      timeout=(10, 30))
     # retain any new cookies that got set in this request
     cookies = tt.cookies
     soup = BeautifulSoup(tt.text, "html.parser")
@@ -47,7 +49,7 @@ def alt_get_tiktok_json(video_url,browser_name=None):
     tt = requests.get(video_url,
                       headers=headers,
                       cookies=cookies,
-                      timeout=20)
+                      timeout=(10, 30))
     # retain any new cookies that got set in this request
     cookies = tt.cookies
     soup = BeautifulSoup(tt.text, "html.parser")
@@ -66,6 +68,9 @@ def get_tiktok_video_by_yt_dlp(url):
         'format': 'best',
         'outtmpl': output_filename,
         'quiet': True,
+        'retries': 3,
+        'fragment_retries': 3,
+        'socket_timeout': 30,
     }
 
     downloaded_file = None
@@ -91,6 +96,23 @@ def get_tiktok_video_by_yt_dlp(url):
     else:
         raise Exception("Failed to download video with yt-dlp.")
 
+def _request_with_retry(url, request_headers, request_cookies, retries=3, backoff=1.5):
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return requests.get(
+                url,
+                allow_redirects=True,
+                headers=request_headers,
+                cookies=request_cookies,
+                timeout=(10, 40),
+            )
+        except (RequestsTimeout, RequestException) as exc:
+            last_exc = exc
+            if attempt < retries - 1:
+                time.sleep(backoff ** attempt)
+    raise last_exc
+
 def get_bytes(video_url):
     try:
         browser_name="firefox"
@@ -107,7 +129,7 @@ def get_bytes(video_url):
                     tt_video_url = slide['imageURL']['urlList'][0]
                     headers['referer'] = 'https://www.tiktok.com/'
                     # include cookies with the video request
-                    tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
+                    tt_video = _request_with_retry(tt_video_url, headers, cookies)
                     bytes_list.append(tt_video.content)
                 return bytes_list
             else:
@@ -117,7 +139,7 @@ def get_bytes(video_url):
                     tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['downloadAddr']
                 headers['referer'] = 'https://www.tiktok.com/'
                 # include cookies with the video request
-                tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
+                tt_video = _request_with_retry(tt_video_url, headers, cookies)
             return tt_video.content
 
         else:
@@ -131,7 +153,7 @@ def get_bytes(video_url):
                 tt_video_url = tt_json["__DEFAULT_SCOPE__"]['webapp.video-detail']['itemInfo']['itemStruct']['video']['downloadAddr']
             headers['referer'] = 'https://www.tiktok.com/'
             # include cookies with the video request
-            tt_video = requests.get(tt_video_url, allow_redirects=True, headers=headers, cookies=cookies)
+            tt_video = _request_with_retry(tt_video_url, headers, cookies)
             return tt_video.content
     except Exception:
         return get_tiktok_video_by_yt_dlp(video_url)

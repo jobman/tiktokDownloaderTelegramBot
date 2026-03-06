@@ -18,6 +18,23 @@ TIKTOK_PATTERN = r"(https?://(www\.|vm\.|vt\.)?tiktok\.com/[^\s]+)"
 INSTAGRAM_PATTERN = r"(https?://(www\.)?instagram\.com/(p|reel)/[^\s]+)"
 YOUTUBE_PATTERN = r"(https?://(www\.)?youtube\.com/shorts/[^\s]+)"
 
+def is_timeout_error(error: Exception) -> bool:
+    message = str(error).lower()
+    timeout_markers = ("timed out", "timeout", "read timed out", "connect timeout")
+    return any(marker in message for marker in timeout_markers)
+
+async def run_blocking_with_retry(func, *args, retries=2, delay=1.0):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return await asyncio.to_thread(func, *args)
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries - 1 and is_timeout_error(exc):
+                await asyncio.sleep(delay * (attempt + 1))
+                continue
+            raise last_error
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что сообщение из группы и содержит текст
     if update.message and update.message.text:
@@ -33,7 +50,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tiktok_url = tiktok_match.group(0)
             try:
                 # Получаем данные от TikTok
-                tiktok_bytes = get_tiktok_bytes(tiktok_url)
+                tiktok_bytes = await run_blocking_with_retry(get_tiktok_bytes, tiktok_url)
                 
                 # Удаляем оригинальное сообщение
                 await update.message.delete()
@@ -75,7 +92,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             instagram_url = instagram_match.group(0)
             try:
                 # Получаем видео из Instagram
-                video_bytes = get_instagram_video(instagram_url)
+                video_bytes = await run_blocking_with_retry(get_instagram_video, instagram_url)
                 
                 # Удаляем оригинальное сообщение
                 await update.message.delete()
@@ -97,7 +114,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             youtube_url = youtube_match.group(0)
             try:
                 # Получаем видео из YouTube
-                video_bytes = get_youtube_video(youtube_url)
+                video_bytes = await run_blocking_with_retry(get_youtube_video, youtube_url)
                 
                 # Удаляем оригинальное сообщение
                 await update.message.delete()
