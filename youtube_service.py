@@ -1,6 +1,8 @@
 import yt_dlp
 import re
 
+from settings import YT_DLP_FRAGMENT_RETRIES, YT_DLP_RETRIES, YT_DLP_SOCKET_TIMEOUT
+
 def get_youtube_video(url):
     """Downloads a YouTube Shorts video and returns its bytes."""
     if not re.search(r"youtube\.com/shorts/", url):
@@ -10,9 +12,9 @@ def get_youtube_video(url):
         'format': 'bestvideo+bestaudio/best',
         'outtmpl': '%(id)s.%(ext)s',
         'quiet': True,
-        'retries': 3,
-        'fragment_retries': 3,
-        'socket_timeout': 30,
+        'retries': YT_DLP_RETRIES,
+        'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
+        'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

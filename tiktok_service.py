@@ -10,6 +10,15 @@ import os
 import time
 from requests.exceptions import Timeout as RequestsTimeout, RequestException
 
+from settings import (
+    REQUEST_CONNECT_TIMEOUT,
+    REQUEST_READ_TIMEOUT,
+    REQUEST_RETRIES,
+    YT_DLP_FRAGMENT_RETRIES,
+    YT_DLP_RETRIES,
+    YT_DLP_SOCKET_TIMEOUT,
+)
+
 
 url_regex = '(?<=\.com/)(.+?)(?=\?|$)'
 headers = {'Accept-Encoding': 'gzip, deflate, sdch',
@@ -29,7 +38,7 @@ def get_tiktok_json(video_url,browser_name=None):
     tt = requests.get(video_url,
                       headers=headers,
                       cookies=cookies,
-                      timeout=(10, 30))
+                      timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT))
     # retain any new cookies that got set in this request
     cookies = tt.cookies
     soup = BeautifulSoup(tt.text, "html.parser")
@@ -49,7 +58,7 @@ def alt_get_tiktok_json(video_url,browser_name=None):
     tt = requests.get(video_url,
                       headers=headers,
                       cookies=cookies,
-                      timeout=(10, 30))
+                      timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT))
     # retain any new cookies that got set in this request
     cookies = tt.cookies
     soup = BeautifulSoup(tt.text, "html.parser")
@@ -68,9 +77,9 @@ def get_tiktok_video_by_yt_dlp(url):
         'format': 'best',
         'outtmpl': output_filename,
         'quiet': True,
-        'retries': 3,
-        'fragment_retries': 3,
-        'socket_timeout': 30,
+        'retries': YT_DLP_RETRIES,
+        'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
+        'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
     }
 
     downloaded_file = None
@@ -96,7 +105,7 @@ def get_tiktok_video_by_yt_dlp(url):
     else:
         raise Exception("Failed to download video with yt-dlp.")
 
-def _request_with_retry(url, request_headers, request_cookies, retries=3, backoff=1.5):
+def _request_with_retry(url, request_headers, request_cookies, retries=REQUEST_RETRIES, backoff=1.5):
     last_exc = None
     for attempt in range(retries):
         try:
@@ -105,7 +114,7 @@ def _request_with_retry(url, request_headers, request_cookies, retries=3, backof
                 allow_redirects=True,
                 headers=request_headers,
                 cookies=request_cookies,
-                timeout=(10, 40),
+                timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT),
             )
         except (RequestsTimeout, RequestException) as exc:
             last_exc = exc

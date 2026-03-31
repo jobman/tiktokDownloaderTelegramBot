@@ -6,6 +6,8 @@ import time
 import logging
 import yt_dlp
 
+from settings import YT_DLP_FRAGMENT_RETRIES, YT_DLP_RETRIES, YT_DLP_SOCKET_TIMEOUT
+
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,9 +28,9 @@ def get_instagram_video_by_yt_dlp(url):
         'format': 'best',
         'outtmpl': output_filename,
         'quiet': True,
-        'retries': 3,
-        'fragment_retries': 3,
-        'socket_timeout': 30,
+        'retries': YT_DLP_RETRIES,
+        'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
+        'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
     }
 
     downloaded_file = None

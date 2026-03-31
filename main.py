@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import os
 from telegram.error import NetworkError
 import asyncio
+from settings import BLOCKING_RETRIES, BLOCKING_RETRY_DELAY
 
 load_dotenv()
 # Токен вашего бота
@@ -23,7 +24,7 @@ def is_timeout_error(error: Exception) -> bool:
     timeout_markers = ("timed out", "timeout", "read timed out", "connect timeout")
     return any(marker in message for marker in timeout_markers)
 
-async def run_blocking_with_retry(func, *args, retries=2, delay=1.0):
+async def run_blocking_with_retry(func, *args, retries=BLOCKING_RETRIES, delay=BLOCKING_RETRY_DELAY):
     last_error = None
     for attempt in range(retries):
         try:
