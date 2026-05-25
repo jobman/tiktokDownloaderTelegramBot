@@ -36,6 +36,35 @@ async def run_blocking_with_retry(func, *args, retries=BLOCKING_RETRIES, delay=B
                 continue
             raise last_error
 
+async def send_tiktok_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tiktok_bytes, sender_name: str):
+    if isinstance(tiktok_bytes, list):
+        # Если вернулся список (фотографии)
+        if len(tiktok_bytes) <= 10:
+            # Отправляем альбом, если фотографий 10 или меньше
+            media = [InputMediaPhoto(photo) for photo in tiktok_bytes]
+            await context.bot.send_media_group(
+                chat_id=chat_id,
+                media=media,
+                caption=f"{sender_name}" if media else None
+            )
+        else:
+            # Отправляем фотографии по одной, если их больше 10
+            for photo in tiktok_bytes:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=f"{sender_name}"
+                )
+    else:
+        # Если вернулось видео (байты)
+        video_bytes = tiktok_bytes
+        await context.bot.send_video(
+            chat_id=chat_id,
+            video=video_bytes,
+            supports_streaming=True,
+            caption=f"{sender_name}"
+        )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что сообщение из группы и содержит текст
     if update.message and update.message.text:
@@ -52,41 +81,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 # Получаем данные от TikTok
                 tiktok_bytes = await run_blocking_with_retry(get_tiktok_bytes, tiktok_url)
-                
-                # Удаляем оригинальное сообщение
-                await update.message.delete()
-                
-                if isinstance(tiktok_bytes, list):
-                    # Если вернулся список (фотографии)
-                    if len(tiktok_bytes) <= 10:
-                        # Отправляем альбом, если фотографий 10 или меньше
-                        media = [InputMediaPhoto(photo) for photo in tiktok_bytes]
-                        await context.bot.send_media_group(
-                            chat_id=update.message.chat_id,
-                            media=media,
-                            caption=f"{sender_name}" if media else None
-                        )
-                    else:
-                        # Отправляем фотографии по одной, если их больше 10
-                        for photo in tiktok_bytes:
-                            await context.bot.send_photo(
-                                chat_id=update.message.chat_id,
-                                photo=photo,
-                                caption=f"{sender_name}"
-                            )
-                else:
-                    # Если вернулось видео (байты)
-                    video_bytes = tiktok_bytes
-                    await context.bot.send_video(
-                        chat_id=update.message.chat_id,
-                        video=video_bytes,
-                        supports_streaming=True,
-                        caption=f"{sender_name}"
-                    )
             except Exception as e:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text=f"Ошибка при обработке TikTok ссылки: {str(e)}\n{sender_name}"
+                )
+                return
+
+            # Удаляем оригинальное сообщение, но не срываем отправку уже скачанного медиа
+            try:
+                await update.message.delete()
+            except Exception as e:
+                print(f"Failed to delete original TikTok message, continuing: {e}")
+
+            try:
+                await send_tiktok_media(context, update.message.chat_id, tiktok_bytes, sender_name)
+            except Exception as e:
+                if is_timeout_error(e):
+                    print(f"TikTok media send timed out, suppressing chat error: {e}")
+                    return
+
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"Видео TikTok скачано, но не удалось отправить: {str(e)}\n{sender_name}"
                 )
         
         elif instagram_match:
