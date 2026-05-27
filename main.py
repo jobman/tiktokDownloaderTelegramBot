@@ -65,6 +65,20 @@ async def send_tiktok_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, ti
             caption=f"{sender_name}"
         )
 
+async def delete_original_message(message, source_name: str):
+    try:
+        await message.delete()
+    except Exception as e:
+        print(f"Failed to delete original {source_name} message, continuing: {e}")
+
+async def send_downloaded_video(context: ContextTypes.DEFAULT_TYPE, chat_id: int, video_bytes, filename: str, sender_name: str):
+    await context.bot.send_video(
+        chat_id=chat_id,
+        video=InputFile(video_bytes, filename=filename),
+        supports_streaming=True,
+        caption=f"{sender_name}"
+    )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, что сообщение из группы и содержит текст
     if update.message and update.message.text:
@@ -89,10 +103,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             # Удаляем оригинальное сообщение, но не срываем отправку уже скачанного медиа
-            try:
-                await update.message.delete()
-            except Exception as e:
-                print(f"Failed to delete original TikTok message, continuing: {e}")
+            await delete_original_message(update.message, "TikTok")
 
             try:
                 await send_tiktok_media(context, update.message.chat_id, tiktok_bytes, sender_name)
@@ -111,21 +122,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 # Получаем видео из Instagram
                 video_bytes = await run_blocking_with_retry(get_instagram_video, instagram_url)
-                
-                # Удаляем оригинальное сообщение
-                await update.message.delete()
-                
-                # Отправляем видео
-                await context.bot.send_video(
-                    chat_id=update.message.chat_id,
-                    video=InputFile(video_bytes, filename="instagram_video.mp4"),
-                    supports_streaming=True,
-                    caption=f"{sender_name}"
-                )
             except Exception as e:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text=f"Ошибка при обработке Instagram ссылки: {str(e)}\n{sender_name}"
+                )
+                return
+
+            # Удаляем оригинальное сообщение, но не срываем отправку уже скачанного медиа
+            await delete_original_message(update.message, "Instagram")
+
+            try:
+                # Отправляем видео
+                await send_downloaded_video(
+                    context,
+                    update.message.chat_id,
+                    video_bytes,
+                    "instagram_video.mp4",
+                    sender_name
+                )
+            except Exception as e:
+                if is_timeout_error(e):
+                    print(f"Instagram video send timed out, suppressing chat error: {e}")
+                    return
+
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"Видео Instagram скачано, но не удалось отправить: {str(e)}\n{sender_name}"
                 )
         
         elif youtube_match:
@@ -133,21 +156,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 # Получаем видео из YouTube
                 video_bytes = await run_blocking_with_retry(get_youtube_video, youtube_url)
-                
-                # Удаляем оригинальное сообщение
-                await update.message.delete()
-                
-                # Отправляем видео
-                await context.bot.send_video(
-                    chat_id=update.message.chat_id,
-                    video=InputFile(video_bytes, filename="youtube_video.mp4"),
-                    supports_streaming=True,
-                    caption=f"{sender_name}"
-                )
             except Exception as e:
                 await context.bot.send_message(
                     chat_id=update.message.chat_id,
                     text=f"Ошибка при обработке YouTube ссылки: {str(e)}\n{sender_name}"
+                )
+                return
+
+            # Удаляем оригинальное сообщение, но не срываем отправку уже скачанного медиа
+            await delete_original_message(update.message, "YouTube")
+
+            try:
+                # Отправляем видео
+                await send_downloaded_video(
+                    context,
+                    update.message.chat_id,
+                    video_bytes,
+                    "youtube_video.mp4",
+                    sender_name
+                )
+            except Exception as e:
+                if is_timeout_error(e):
+                    print(f"YouTube video send timed out, suppressing chat error: {e}")
+                    return
+
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=f"Видео YouTube скачано, но не удалось отправить: {str(e)}\n{sender_name}"
                 )
 
 
