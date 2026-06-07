@@ -14,6 +14,7 @@ from settings import (
     REQUEST_CONNECT_TIMEOUT,
     REQUEST_READ_TIMEOUT,
     REQUEST_RETRIES,
+    YT_DLP_DOWNLOAD_ATTEMPTS,
     YT_DLP_FRAGMENT_RETRIES,
     YT_DLP_RETRIES,
     YT_DLP_SOCKET_TIMEOUT,
@@ -70,9 +71,26 @@ def alt_get_tiktok_json(video_url,browser_name=None):
         return
     return tt_json
 
+def _find_downloaded_file(output_filename):
+    for filename in os.listdir('.'):
+        if filename.startswith(output_filename):
+            return filename
+    return None
+
+
+def _remove_downloaded_files(output_filename):
+    for filename in os.listdir('.'):
+        if filename.startswith(output_filename):
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
+
 def get_tiktok_video_by_yt_dlp(url):
     """Downloads a TikTok video using yt-dlp and returns its bytes."""
     output_filename = 'downloaded_tiktok_video'
+    attempts = max(1, YT_DLP_DOWNLOAD_ATTEMPTS)
     ydl_opts = {
         'format': 'best',
         'outtmpl': output_filename,
@@ -82,28 +100,32 @@ def get_tiktok_video_by_yt_dlp(url):
         'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
     }
 
-    downloaded_file = None
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception:
-        # The download might have failed, but the file might still be there.
-        pass
+    last_error = None
+    for attempt in range(attempts):
+        _remove_downloaded_files(output_filename)
+        downloaded_file = None
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(url, download=True)
+        except Exception as exc:
+            last_error = exc
 
-    # Find the downloaded file, since we don't know the extension
-    for f in os.listdir('.'):
-        if f.startswith(output_filename):
-            downloaded_file = f
-            break
+        # Find the downloaded file, since we don't know the extension.
+        downloaded_file = _find_downloaded_file(output_filename)
 
-    if downloaded_file:
-        with open(downloaded_file, 'rb') as f:
-            video_bytes = f.read()
-        
-        os.remove(downloaded_file)
-        return video_bytes
-    else:
-        raise Exception("Failed to download video with yt-dlp.")
+        if downloaded_file:
+            with open(downloaded_file, 'rb') as f:
+                video_bytes = f.read()
+
+            os.remove(downloaded_file)
+            return video_bytes
+
+        if attempt < attempts - 1:
+            time.sleep(1.5 ** attempt)
+
+    if last_error:
+        raise Exception(f"Failed to download video with yt-dlp after {attempts} attempts: {last_error}")
+    raise Exception(f"Failed to download video with yt-dlp after {attempts} attempts.")
 
 def _request_with_retry(url, request_headers, request_cookies, retries=REQUEST_RETRIES, backoff=1.5):
     last_exc = None
