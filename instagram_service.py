@@ -3,14 +3,10 @@ import re
 import os
 import shutil
 import time
-import logging
 import yt_dlp
 
 from settings import YT_DLP_FRAGMENT_RETRIES, YT_DLP_RETRIES, YT_DLP_SOCKET_TIMEOUT
-
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from silent_logging import YT_DLP_LOGGER
 
 def get_shortcode_from_url(url):
     """Извлекает shortcode из URL Instagram."""
@@ -28,6 +24,9 @@ def get_instagram_video_by_yt_dlp(url):
         'format': 'best',
         'outtmpl': output_filename,
         'quiet': True,
+        'no_warnings': True,
+        'noprogress': True,
+        'logger': YT_DLP_LOGGER,
         'retries': YT_DLP_RETRIES,
         'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
         'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
@@ -60,25 +59,27 @@ def get_instagram_video(url, username=None, password=None):
     """Скачивает видео из Instagram и возвращает его байты."""
     try:
         # Инициализация Instaloader
-        L = instaloader.Instaloader(download_pictures=False, download_comments=False, download_geotags=False)
+        L = instaloader.Instaloader(
+            download_pictures=False,
+            download_comments=False,
+            download_geotags=False,
+            quiet=True,
+        )
+        L.context.error = lambda *args, **kwargs: None
         
         # Авторизация, если предоставлены логин и пароль
         if username and password:
             L.login(username, password)
-            logger.info("Авторизация успешна")
         
         # Получение shortcode из URL
         shortcode = get_shortcode_from_url(url)
-        logger.info(f"Shortcode: {shortcode}")
         
         # Абсолютный путь к папке с именем shortcode
         post_dir = os.path.normpath(os.path.join(os.getcwd(), shortcode))
-        logger.info(f"Post directory: {post_dir}")
         
         # Удаляем старую папку, если существует
         if os.path.exists(post_dir):
             shutil.rmtree(post_dir, ignore_errors=True)
-            logger.info(f"Removed existing post directory: {post_dir}")
         
         # Загрузка поста
         post = instaloader.Post.from_shortcode(L.context, shortcode)
@@ -89,7 +90,6 @@ def get_instagram_video(url, username=None, password=None):
         
         # Скачиваем пост, передавая только shortcode как target
         L.download_post(post, target=shortcode)
-        logger.info(f"Post downloaded to: {post_dir}")
         
         # Даём небольшую задержку, чтобы файл точно записался
         time.sleep(1)
@@ -99,13 +99,11 @@ def get_instagram_video(url, username=None, password=None):
             raise FileNotFoundError(f"Папка поста не найдена: {post_dir}")
         
         # Логируем содержимое папки
-        logger.info(f"Contents of {post_dir}: {os.listdir(post_dir)}")
         
         # Находим видеофайл в папке поста
         for file in os.listdir(post_dir):
             if file.endswith(".mp4"):
                 video_path = os.path.normpath(os.path.join(post_dir, file))
-                logger.info(f"Found video file: {video_path}")
                 
                 # Проверяем, существует ли файл
                 if not os.path.exists(video_path):
@@ -117,12 +115,10 @@ def get_instagram_video(url, username=None, password=None):
                 
                 # Удаляем папку поста после чтения
                 shutil.rmtree(post_dir, ignore_errors=True)
-                logger.info(f"Removed post directory: {post_dir}")
                 
                 return video_bytes
         
         raise FileNotFoundError("Видеофайл не найден в папке поста")
             
     except Exception:
-        logger.error("Instaloader failed, falling back to yt-dlp")
         return get_instagram_video_by_yt_dlp(url)

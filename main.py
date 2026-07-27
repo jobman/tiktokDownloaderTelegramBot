@@ -1,3 +1,7 @@
+from silent_logging import disable_all_logging
+
+disable_all_logging()
+
 from telegram import Update, InputMediaPhoto, InputFile
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import re
@@ -68,8 +72,8 @@ async def send_tiktok_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, ti
 async def delete_original_message(message, source_name: str):
     try:
         await message.delete()
-    except Exception as e:
-        print(f"Failed to delete original {source_name} message, continuing: {e}")
+    except Exception:
+        pass
 
 async def send_downloaded_video(context: ContextTypes.DEFAULT_TYPE, chat_id: int, video_bytes, filename: str, sender_name: str):
     await context.bot.send_video(
@@ -109,7 +113,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await send_tiktok_media(context, update.message.chat_id, tiktok_bytes, sender_name)
             except Exception as e:
                 if is_timeout_error(e):
-                    print(f"TikTok media send timed out, suppressing chat error: {e}")
                     return
 
                 await context.bot.send_message(
@@ -143,7 +146,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 if is_timeout_error(e):
-                    print(f"Instagram video send timed out, suppressing chat error: {e}")
                     return
 
                 await context.bot.send_message(
@@ -177,7 +179,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 if is_timeout_error(e):
-                    print(f"YouTube video send timed out, suppressing chat error: {e}")
                     return
 
                 await context.bot.send_message(
@@ -187,11 +188,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def error_handler(update: Update, context):
-    """Custom error handler to suppress stack traces and print clean error messages."""
-    if isinstance(context.error, NetworkError):
-        print("Ошибка сети")
-    else:
-        print(f"Unexpected error during polling: {context.error}")
+    """Suppress polling errors; the service retries network failures itself."""
+    return None
 
 async def run_bot():
     # Create the application
@@ -214,14 +212,12 @@ async def run_bot():
             await application.start()
             started = True
             await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            print("Программа запущена")
             
             # Keep the bot running until stopped
             await asyncio.Future()  # Infinite wait
             break  # Exit loop if polling starts successfully
 
-        except NetworkError as e:
-            print(f"Ошибка сети, повторная попытка через 60 секунд: {e}")
+        except NetworkError:
             await asyncio.sleep(60)  # Wait 60 seconds before retrying
             
             # Clean up only if necessary
@@ -235,8 +231,7 @@ async def run_bot():
             initialized = False
             started = False
 
-        except Exception as e:
-            print(f"Unexpected error: {e}. Stopping bot.")
+        except Exception:
             # Clean up only if necessary
             if application.updater.running:
                 await application.updater.stop()

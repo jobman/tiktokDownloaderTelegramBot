@@ -1,5 +1,3 @@
-import pyktok as pyk
-pyk.specify_browser('firefox')
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -19,6 +17,7 @@ from settings import (
     YT_DLP_RETRIES,
     YT_DLP_SOCKET_TIMEOUT,
 )
+from silent_logging import YT_DLP_LOGGER
 
 
 url_regex = '(?<=\.com/)(.+?)(?=\?|$)'
@@ -67,7 +66,6 @@ def alt_get_tiktok_json(video_url,browser_name=None):
     try:
         tt_json = json.loads(tt_script.string)
     except AttributeError:
-        print("The function encountered a downstream error and did not deliver any data, which happens periodically for various reasons. Please try again later.")
         return
     return tt_json
 
@@ -95,6 +93,9 @@ def get_tiktok_video_by_yt_dlp(url):
         'format': 'best',
         'outtmpl': output_filename,
         'quiet': True,
+        'no_warnings': True,
+        'noprogress': True,
+        'logger': YT_DLP_LOGGER,
         'retries': YT_DLP_RETRIES,
         'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
         'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
@@ -188,6 +189,3 @@ def get_bytes(video_url):
             return tt_video.content
     except Exception:
         return get_tiktok_video_by_yt_dlp(video_url)
-
-if __name__ == "__main__":
-    print(len(get_bytes("https://vm.tiktok.com/ZMBWpLNH2/")))
