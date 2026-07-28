@@ -1,0 +1,30 @@
+name: Deploy TikTok bot
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-tiktok-bot-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - orion
+      - tiktok-bot
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Deploy and restart service
+        run: /usr/local/bin/deploy-tiktok-bot "$GITHUB_WORKSPACE" "$GITHUB_SHA"
