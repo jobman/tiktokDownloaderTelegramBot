@@ -6,6 +6,7 @@ import browser_cookie3
 import yt_dlp
 import os
 import time
+from urllib.parse import urlsplit, urlunsplit
 from requests.exceptions import Timeout as RequestsTimeout, RequestException
 
 from settings import (
@@ -85,10 +86,82 @@ def _remove_downloaded_files(output_filename):
                 pass
 
 
+def _resolve_tiktok_url(url):
+    """Resolve short TikTok links before extraction to avoid repeated redirects."""
+    if not re.match(r'https?://(?:vm|vt)\.tiktok\.com/', url):
+        return url
+
+    try:
+        with requests.get(
+            url,
+            allow_redirects=True,
+            headers=headers,
+            stream=True,
+            timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT),
+        ) as response:
+            response.raise_for_status()
+            resolved = urlsplit(response.url)
+            return urlunsplit((resolved.scheme, resolved.netloc, resolved.path, '', ''))
+    except RequestException:
+        return url
+
+
+def _get_tiktok_video_from_embed(url):
+    """Download a TikTok video through its public embed metadata."""
+    video_id_match = re.search(r'/video/(\d+)', url)
+    if not video_id_match:
+        raise ValueError('Unable to extract TikTok video ID')
+
+    video_id = video_id_match.group(1)
+    embed_url = f'https://www.tiktok.com/embed/v2/{video_id}'
+    response = _request_with_retry(embed_url, headers, {})
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    state_script = soup.find('script', attrs={'id': '__FRONTITY_CONNECT_STATE__'})
+    if state_script is None:
+        raise ValueError('Unable to extract TikTok embed state')
+
+    state = json.loads(state_script.get_text())
+    route_values = state.get('source', {}).get('data', {}).values()
+    item_info = next(
+        (
+            route.get('videoData', {}).get('itemInfos')
+            for route in route_values
+            if isinstance(route, dict) and route.get('videoData', {}).get('itemInfos')
+        ),
+        None,
+    )
+    video_urls = item_info.get('video', {}).get('urls', []) if item_info else []
+    if not video_urls:
+        raise ValueError('Unable to extract TikTok embed video URL')
+
+    video_headers = {**headers, 'Referer': embed_url}
+    last_error = None
+    for video_url in video_urls:
+        try:
+            video_response = _request_with_retry(video_url, video_headers, {})
+            video_response.raise_for_status()
+            if video_response.content:
+                return video_response.content
+        except RequestException as exc:
+            last_error = exc
+
+    if last_error:
+        raise last_error
+    raise ValueError('TikTok embed returned an empty video')
+
+
 def get_tiktok_video_by_yt_dlp(url):
-    """Downloads a TikTok video using yt-dlp and returns its bytes."""
+    """Download a TikTok video, with yt-dlp as a fallback."""
     output_filename = 'downloaded_tiktok_video'
     attempts = max(1, YT_DLP_DOWNLOAD_ATTEMPTS)
+    resolved_url = _resolve_tiktok_url(url)
+    try:
+        return _get_tiktok_video_from_embed(resolved_url)
+    except Exception:
+        pass
+
     ydl_opts = {
         'format': 'best',
         'outtmpl': output_filename,
@@ -102,27 +175,27 @@ def get_tiktok_video_by_yt_dlp(url):
     }
 
     last_error = None
-    for attempt in range(attempts):
-        _remove_downloaded_files(output_filename)
-        downloaded_file = None
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(url, download=True)
-        except Exception as exc:
-            last_error = exc
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        for attempt in range(attempts):
+            _remove_downloaded_files(output_filename)
+            downloaded_file = None
+            try:
+                ydl.extract_info(resolved_url, download=True)
+            except Exception as exc:
+                last_error = exc
 
-        # Find the downloaded file, since we don't know the extension.
-        downloaded_file = _find_downloaded_file(output_filename)
+            # Find the downloaded file, since we don't know the extension.
+            downloaded_file = _find_downloaded_file(output_filename)
 
-        if downloaded_file:
-            with open(downloaded_file, 'rb') as f:
-                video_bytes = f.read()
+            if downloaded_file:
+                with open(downloaded_file, 'rb') as f:
+                    video_bytes = f.read()
 
-            os.remove(downloaded_file)
-            return video_bytes
+                os.remove(downloaded_file)
+                return video_bytes
 
-        if attempt < attempts - 1:
-            time.sleep(1.5 ** attempt)
+            if attempt < attempts - 1:
+                time.sleep(min(1.5 ** attempt, 8))
 
     if last_error:
         raise Exception(f"Failed to download video with yt-dlp after {attempts} attempts: {last_error}")
