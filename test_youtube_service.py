@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import youtube_service
 
@@ -10,6 +10,7 @@ class YouTubeOptionsTests(unittest.TestCase):
         options = youtube_service._get_ydl_options()
 
         self.assertNotIn('cookiefile', options)
+        self.assertEqual(options['js_runtimes'], {'node': {}})
 
     @patch('youtube_service.os.path.isfile', return_value=True)
     @patch('youtube_service.YOUTUBE_COOKIES_FILE', '/run/secrets/youtube-cookies.txt')
@@ -29,6 +30,35 @@ class YouTubeOptionsTests(unittest.TestCase):
             youtube_service._get_ydl_options()
 
         isfile.assert_called_once_with('/missing/youtube-cookies.txt')
+
+
+class YouTubeDownloadTests(unittest.TestCase):
+    @patch('youtube_service.YouTube')
+    def test_downloads_progressive_stream_with_pytubefix(self, youtube):
+        stream = MagicMock()
+        stream.stream_to_buffer.side_effect = lambda buffer: buffer.write(b'video')
+        youtube.return_value.streams.get_highest_resolution.return_value = stream
+
+        result = youtube_service._get_youtube_video_with_pytubefix(
+            'https://www.youtube.com/shorts/video-id'
+        )
+
+        self.assertEqual(result, b'video')
+        stream.stream_to_buffer.assert_called_once()
+
+    @patch('youtube_service._get_youtube_video_with_yt_dlp', return_value=b'fallback')
+    @patch(
+        'youtube_service._get_youtube_video_with_pytubefix',
+        side_effect=RuntimeError('blocked'),
+    )
+    def test_falls_back_to_yt_dlp(self, pytubefix_download, yt_dlp_download):
+        url = 'https://www.youtube.com/shorts/video-id'
+
+        result = youtube_service.get_youtube_video(url)
+
+        self.assertEqual(result, b'fallback')
+        pytubefix_download.assert_called_once_with(url)
+        yt_dlp_download.assert_called_once_with(url)
 
 
 if __name__ == '__main__':

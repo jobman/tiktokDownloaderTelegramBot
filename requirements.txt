@@ -1,4 +1,5 @@
 pyktok
+pytubefix
 python-telegram-bot
 python-dotenv
 instaloader

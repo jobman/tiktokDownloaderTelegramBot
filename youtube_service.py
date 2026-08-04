@@ -1,7 +1,9 @@
+from io import BytesIO
 import os
 import re
 
 import yt_dlp
+from pytubefix import YouTube
 
 from settings import (
     YOUTUBE_COOKIES_FILE,
@@ -23,6 +25,7 @@ def _get_ydl_options():
         'retries': YT_DLP_RETRIES,
         'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
         'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
+        'js_runtimes': {'node': {}},
     }
 
     if YOUTUBE_COOKIES_FILE:
@@ -35,11 +38,17 @@ def _get_ydl_options():
     return options
 
 
-def get_youtube_video(url):
-    """Downloads a YouTube Shorts video and returns its bytes."""
-    if not re.search(r"youtube\.com/shorts/", url):
-        raise ValueError("The provided URL is not a YouTube Shorts link.")
+def _get_youtube_video_with_pytubefix(url):
+    stream = YouTube(url).streams.get_highest_resolution()
+    if stream is None:
+        raise RuntimeError('pytubefix did not find a downloadable video stream')
 
+    buffer = BytesIO()
+    stream.stream_to_buffer(buffer)
+    return buffer.getvalue()
+
+
+def _get_youtube_video_with_yt_dlp(url):
     ydl_opts = _get_ydl_options()
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -54,3 +63,20 @@ def get_youtube_video(url):
     os.remove(filename)
 
     return video_bytes
+
+
+def get_youtube_video(url):
+    """Downloads a YouTube Shorts video and returns its bytes."""
+    if not re.search(r"youtube\.com/shorts/", url):
+        raise ValueError("The provided URL is not a YouTube Shorts link.")
+
+    try:
+        return _get_youtube_video_with_pytubefix(url)
+    except Exception as pytubefix_error:
+        try:
+            return _get_youtube_video_with_yt_dlp(url)
+        except Exception as yt_dlp_error:
+            raise RuntimeError(
+                'Unable to download YouTube video with pytubefix or yt-dlp: '
+                f'{pytubefix_error}; {yt_dlp_error}'
+            ) from yt_dlp_error
