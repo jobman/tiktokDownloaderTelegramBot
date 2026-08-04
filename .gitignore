@@ -138,6 +138,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Authentication cookies must never be committed.
+youtube-cookies*.txt
+cookies.txt
+
 # Spyder project settings
 .spyderproject
 .spyproject
