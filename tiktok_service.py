@@ -5,6 +5,8 @@ import json
 import browser_cookie3
 import yt_dlp
 import os
+import subprocess
+import tempfile
 import time
 from urllib.parse import urlsplit, urlunsplit
 from requests.exceptions import Timeout as RequestsTimeout, RequestException
@@ -13,6 +15,8 @@ from settings import (
     REQUEST_CONNECT_TIMEOUT,
     REQUEST_READ_TIMEOUT,
     REQUEST_RETRIES,
+    TELEGRAM_VIDEO_MAX_BYTES,
+    VIDEO_COMPRESSION_TIMEOUT,
     YT_DLP_DOWNLOAD_ATTEMPTS,
     YT_DLP_FRAGMENT_RETRIES,
     YT_DLP_RETRIES,
@@ -29,6 +33,128 @@ headers = {'Accept-Encoding': 'gzip, deflate, sdch',
            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
            'Cache-Control': 'max-age=0',
            'Connection': 'keep-alive'}
+
+
+def _target_bitrates(duration, max_bytes):
+    if duration <= 0:
+        raise ValueError('Unable to determine video duration')
+
+    # Keep enough room for the MP4 container and Telegram multipart overhead.
+    total_bitrate = int(max_bytes * 8 * 0.90 / duration)
+    audio_bitrate = min(96_000, max(48_000, total_bitrate // 8))
+    video_bitrate = total_bitrate - audio_bitrate
+    if video_bitrate < 100_000:
+        raise ValueError('Video is too long to fit within the Telegram size limit')
+    return video_bitrate, audio_bitrate
+
+
+def _probe_video_duration(filename):
+    result = subprocess.run(
+        [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            filename,
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=VIDEO_COMPRESSION_TIMEOUT,
+    )
+    return float(result.stdout.strip())
+
+
+def _run_ffmpeg_compression(input_file, output_file, passlog, video_bitrate, audio_bitrate):
+    video_options = [
+        '-map', '0:v:0',
+        '-vf', 'scale=-2:min(720\\,ih)',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-pix_fmt', 'yuv420p',
+        '-b:v', str(video_bitrate),
+        '-maxrate', str(video_bitrate),
+        '-bufsize', str(video_bitrate * 2),
+        '-passlogfile', passlog,
+    ]
+    common = [
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', input_file,
+    ]
+
+    subprocess.run(
+        common + video_options + [
+            '-pass', '1', '-an', '-f', 'null', os.devnull,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=VIDEO_COMPRESSION_TIMEOUT,
+    )
+    subprocess.run(
+        common + video_options + [
+            '-pass', '2',
+            '-map', '0:a:0?',
+            '-c:a', 'aac',
+            '-b:a', str(audio_bitrate),
+            '-map_metadata', '-1',
+            '-movflags', '+faststart',
+            output_file,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=VIDEO_COMPRESSION_TIMEOUT,
+    )
+
+
+def _compress_video_bytes(video_bytes, max_bytes=TELEGRAM_VIDEO_MAX_BYTES):
+    with tempfile.TemporaryDirectory(prefix='tiktok-compress-') as temp_dir:
+        input_file = os.path.join(temp_dir, 'input.mp4')
+        output_file = os.path.join(temp_dir, 'output.mp4')
+        passlog = os.path.join(temp_dir, 'ffmpeg-pass')
+
+        with open(input_file, 'wb') as file:
+            file.write(video_bytes)
+
+        duration = _probe_video_duration(input_file)
+        video_bitrate, audio_bitrate = _target_bitrates(duration, max_bytes)
+        _run_ffmpeg_compression(
+            input_file,
+            output_file,
+            passlog,
+            video_bitrate,
+            audio_bitrate,
+        )
+
+        with open(output_file, 'rb') as file:
+            compressed = file.read()
+
+        if len(compressed) > max_bytes:
+            adjusted_video_bitrate = int(
+                video_bitrate * max_bytes / len(compressed) * 0.90
+            )
+            if adjusted_video_bitrate < 100_000:
+                raise ValueError('Unable to reduce video below the Telegram size limit')
+            _run_ffmpeg_compression(
+                input_file,
+                output_file,
+                f'{passlog}-retry',
+                adjusted_video_bitrate,
+                audio_bitrate,
+            )
+            with open(output_file, 'rb') as file:
+                compressed = file.read()
+
+        if not compressed or len(compressed) > max_bytes:
+            raise ValueError('Unable to reduce video below the Telegram size limit')
+        return compressed
+
+
+def _ensure_tiktok_video_size(video_bytes):
+    if len(video_bytes) <= TELEGRAM_VIDEO_MAX_BYTES:
+        return video_bytes
+    return _compress_video_bytes(video_bytes)
 
 def get_tiktok_json(video_url,browser_name=None):
     if 'cookies' not in globals() and browser_name is None:
@@ -138,15 +264,21 @@ def _get_tiktok_video_from_embed(url):
 
     video_headers = {**headers, 'Referer': embed_url}
     last_error = None
+    smallest_video = None
     for video_url in video_urls:
         try:
             video_response = _request_with_retry(video_url, video_headers, {})
             video_response.raise_for_status()
             if video_response.content:
-                return video_response.content
+                if len(video_response.content) <= TELEGRAM_VIDEO_MAX_BYTES:
+                    return video_response.content
+                if smallest_video is None or len(video_response.content) < len(smallest_video):
+                    smallest_video = video_response.content
         except RequestException as exc:
             last_error = exc
 
+    if smallest_video is not None:
+        return smallest_video
     if last_error:
         raise last_error
     raise ValueError('TikTok embed returned an empty video')
@@ -163,7 +295,10 @@ def get_tiktok_video_by_yt_dlp(url):
         pass
 
     ydl_opts = {
-        'format': 'best',
+        'format': (
+            f'best[filesize<{TELEGRAM_VIDEO_MAX_BYTES}]/'
+            f'best[filesize_approx<{TELEGRAM_VIDEO_MAX_BYTES}]/worst'
+        ),
         'outtmpl': output_filename,
         'quiet': True,
         'no_warnings': True,
@@ -218,7 +353,7 @@ def _request_with_retry(url, request_headers, request_cookies, retries=REQUEST_R
                 time.sleep(backoff ** attempt)
     raise last_exc
 
-def get_bytes(video_url):
+def _get_tiktok_media(video_url):
     try:
         browser_name="firefox"
         if 'cookies' not in globals() and browser_name is None:
@@ -262,3 +397,10 @@ def get_bytes(video_url):
             return tt_video.content
     except Exception:
         return get_tiktok_video_by_yt_dlp(video_url)
+
+
+def get_bytes(video_url):
+    media = _get_tiktok_media(video_url)
+    if isinstance(media, list):
+        return media
+    return _ensure_tiktok_video_size(media)

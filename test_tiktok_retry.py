@@ -50,6 +50,44 @@ class TikTokRetryTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         self.assertEqual(request.call_args_list[1].args[0], video_url)
 
+    @patch('tiktok_service.TELEGRAM_VIDEO_MAX_BYTES', 5)
+    @patch('tiktok_service._request_with_retry')
+    def test_prefers_embed_variant_below_telegram_limit(self, request):
+        state = {
+            'source': {
+                'data': {
+                    '/embed/v2/123': {
+                        'videoData': {
+                            'itemInfos': {
+                                'video': {
+                                    'urls': [
+                                        'https://video.example/large.mp4',
+                                        'https://video.example/small.mp4',
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        metadata_response = MagicMock()
+        metadata_response.text = (
+            '<script id="__FRONTITY_CONNECT_STATE__" type="application/json">'
+            f'{json.dumps(state)}'
+            '</script>'
+        )
+        large_response = MagicMock(content=b'123456')
+        small_response = MagicMock(content=b'1234')
+        request.side_effect = [metadata_response, large_response, small_response]
+
+        result = tiktok_service._get_tiktok_video_from_embed(
+            'https://www.tiktok.com/@creator/video/123'
+        )
+
+        self.assertEqual(result, b'1234')
+        self.assertEqual(request.call_count, 3)
+
     @patch('tiktok_service.yt_dlp.YoutubeDL')
     @patch('tiktok_service._get_tiktok_video_from_embed', return_value=b'video')
     @patch('tiktok_service._resolve_tiktok_url')
@@ -97,6 +135,40 @@ class TikTokRetryTests(unittest.TestCase):
         self.assertEqual(sleep.call_args_list[0].args, (1.0,))
         self.assertEqual(sleep.call_args_list[1].args, (1.5,))
         remove_file.assert_called_once_with('downloaded_tiktok_video')
+        selected_format = youtube_dl.call_args.args[0]['format']
+        self.assertIn('filesize<', selected_format)
+        self.assertIn('filesize_approx<', selected_format)
+
+
+class TikTokSizeTests(unittest.TestCase):
+    @patch('tiktok_service.TELEGRAM_VIDEO_MAX_BYTES', 5)
+    @patch('tiktok_service._compress_video_bytes', return_value=b'small')
+    def test_compresses_video_above_telegram_limit(self, compress):
+        result = tiktok_service._ensure_tiktok_video_size(b'123456')
+
+        self.assertEqual(result, b'small')
+        compress.assert_called_once_with(b'123456')
+
+    @patch('tiktok_service.TELEGRAM_VIDEO_MAX_BYTES', 5)
+    @patch('tiktok_service._compress_video_bytes')
+    def test_keeps_video_below_telegram_limit(self, compress):
+        result = tiktok_service._ensure_tiktok_video_size(b'12345')
+
+        self.assertEqual(result, b'12345')
+        compress.assert_not_called()
+
+    def test_calculates_bitrates_with_container_headroom(self):
+        video_bitrate, audio_bitrate = tiktok_service._target_bitrates(
+            duration=60,
+            max_bytes=48_000_000,
+        )
+
+        self.assertGreater(video_bitrate, 100_000)
+        self.assertEqual(audio_bitrate, 96_000)
+        self.assertLessEqual(
+            (video_bitrate + audio_bitrate) * 60,
+            48_000_000 * 8 * 0.90,
+        )
 
 
 if __name__ == '__main__':
