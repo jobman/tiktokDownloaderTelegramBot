@@ -44,7 +44,29 @@ class YouTubeDownloadTests(unittest.TestCase):
         )
 
         self.assertEqual(result, b'video')
+        youtube.assert_called_once_with(
+            'https://www.youtube.com/shorts/video-id',
+            client='ANDROID_VR',
+        )
         stream.stream_to_buffer.assert_called_once()
+
+    @patch('youtube_service.YOUTUBE_PYTUBEFIX_ATTEMPTS', 3)
+    @patch('youtube_service.time.sleep')
+    @patch(
+        'youtube_service._download_with_pytubefix_client',
+        side_effect=[RuntimeError('bot'), RuntimeError('blocked'), b'video'],
+    )
+    def test_retries_pytubefix_with_alternate_clients(self, download, sleep):
+        url = 'https://www.youtube.com/shorts/video-id'
+
+        result = youtube_service._get_youtube_video_with_pytubefix(url)
+
+        self.assertEqual(result, b'video')
+        self.assertEqual(
+            [call.args for call in download.call_args_list],
+            [(url, 'ANDROID_VR'), (url, 'WEB'), (url, 'ANDROID_VR')],
+        )
+        self.assertEqual(sleep.call_count, 2)
 
     @patch('youtube_service._get_youtube_video_with_yt_dlp', return_value=b'fallback')
     @patch(

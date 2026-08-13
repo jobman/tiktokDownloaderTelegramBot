@@ -8,7 +8,7 @@ import os
 import subprocess
 import tempfile
 import time
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from requests.exceptions import Timeout as RequestsTimeout, RequestException
 
 from settings import (
@@ -25,7 +25,7 @@ from settings import (
 from silent_logging import YT_DLP_LOGGER
 
 
-url_regex = '(?<=\.com/)(.+?)(?=\?|$)'
+url_regex = r'(?<=\.com/)(.+?)(?=\?|$)'
 headers = {'Accept-Encoding': 'gzip, deflate, sdch',
            'Accept-Language': 'en-US,en;q=0.8',
            'Upgrade-Insecure-Requests': '1',
@@ -284,6 +284,55 @@ def _get_tiktok_video_from_embed(url):
     raise ValueError('TikTok embed returned an empty video')
 
 
+def _get_tiktok_media_from_tikwm(url):
+    api_url = f'https://www.tikwm.com/api/?{urlencode({"url": url, "hd": "1"})}'
+    response = _request_with_retry(api_url, headers, {})
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get('code') != 0 or not payload.get('data'):
+        raise ValueError('TikWM did not return TikTok media')
+
+    data = payload['data']
+    image_urls = data.get('images') or []
+    if image_urls:
+        images = []
+        for image_url in image_urls:
+            image_response = _request_with_retry(
+                urljoin('https://www.tikwm.com', image_url),
+                headers,
+                {},
+            )
+            image_response.raise_for_status()
+            if image_response.content:
+                images.append(image_response.content)
+        if images:
+            return images
+
+    smallest_video = None
+    for field in ('hdplay', 'play', 'wmplay'):
+        media_url = data.get(field)
+        if not media_url:
+            continue
+        media_response = _request_with_retry(
+            urljoin('https://www.tikwm.com', media_url),
+            headers,
+            {},
+        )
+        if media_response.status_code == 404:
+            continue
+        media_response.raise_for_status()
+        if not media_response.content:
+            continue
+        if len(media_response.content) <= TELEGRAM_VIDEO_MAX_BYTES:
+            return media_response.content
+        if smallest_video is None or len(media_response.content) < len(smallest_video):
+            smallest_video = media_response.content
+
+    if smallest_video is not None:
+        return smallest_video
+    raise ValueError('TikWM returned no downloadable TikTok media')
+
+
 def get_tiktok_video_by_yt_dlp(url):
     """Download a TikTok video, with yt-dlp as a fallback."""
     output_filename = 'downloaded_tiktok_video'
@@ -291,6 +340,11 @@ def get_tiktok_video_by_yt_dlp(url):
     resolved_url = _resolve_tiktok_url(url)
     try:
         return _get_tiktok_video_from_embed(resolved_url)
+    except Exception:
+        pass
+
+    try:
+        return _get_tiktok_media_from_tikwm(resolved_url)
     except Exception:
         pass
 
@@ -340,13 +394,16 @@ def _request_with_retry(url, request_headers, request_cookies, retries=REQUEST_R
     last_exc = None
     for attempt in range(retries):
         try:
-            return requests.get(
+            response = requests.get(
                 url,
                 allow_redirects=True,
                 headers=request_headers,
                 cookies=request_cookies,
                 timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT),
             )
+            if response.status_code == 429 or response.status_code >= 500:
+                response.raise_for_status()
+            return response
         except (RequestsTimeout, RequestException) as exc:
             last_exc = exc
             if attempt < retries - 1:

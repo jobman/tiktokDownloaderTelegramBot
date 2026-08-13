@@ -3,6 +3,8 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+from requests.exceptions import RequestException
+
 import tiktok_service
 
 
@@ -99,6 +101,41 @@ class TikTokRetryTests(unittest.TestCase):
         self.assertEqual(result, b'video')
         get_from_embed.assert_called_once_with(resolve_url.return_value)
         youtube_dl.assert_not_called()
+
+    @patch('tiktok_service._request_with_retry')
+    def test_downloads_video_from_tikwm_fallback(self, request):
+        api_response = MagicMock()
+        api_response.json.return_value = {
+            'code': 0,
+            'data': {'hdplay': '/video.mp4'},
+        }
+        video_response = MagicMock(status_code=200, content=b'video')
+        request.side_effect = [api_response, video_response]
+
+        result = tiktok_service._get_tiktok_media_from_tikwm(
+            'https://www.tiktok.com/@creator/video/123'
+        )
+
+        self.assertEqual(result, b'video')
+        self.assertIn('www.tikwm.com/api/', request.call_args_list[0].args[0])
+        self.assertEqual(
+            request.call_args_list[1].args[0],
+            'https://www.tikwm.com/video.mp4',
+        )
+
+    @patch('tiktok_service.time.sleep')
+    @patch('tiktok_service.requests.get')
+    def test_retries_transient_http_status(self, get, sleep):
+        unavailable = MagicMock(status_code=503)
+        unavailable.raise_for_status.side_effect = RequestException('unavailable')
+        available = MagicMock(status_code=200)
+        get.side_effect = [unavailable, available]
+
+        result = tiktok_service._request_with_retry('url', {}, {}, retries=2)
+
+        self.assertIs(result, available)
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(1.0)
 
     @patch('tiktok_service.YT_DLP_DOWNLOAD_ATTEMPTS', 8)
     @patch('tiktok_service.time.sleep')

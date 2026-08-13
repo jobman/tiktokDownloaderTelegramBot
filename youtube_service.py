@@ -1,12 +1,14 @@
 from io import BytesIO
 import os
 import re
+import time
 
 import yt_dlp
 from pytubefix import YouTube
 
 from settings import (
     YOUTUBE_COOKIES_FILE,
+    YOUTUBE_PYTUBEFIX_ATTEMPTS,
     YT_DLP_FRAGMENT_RETRIES,
     YT_DLP_RETRIES,
     YT_DLP_SOCKET_TIMEOUT,
@@ -38,14 +40,34 @@ def _get_ydl_options():
     return options
 
 
-def _get_youtube_video_with_pytubefix(url):
-    stream = YouTube(url).streams.get_highest_resolution()
+PYTUBEFIX_CLIENTS = ('ANDROID_VR', 'WEB')
+
+
+def _download_with_pytubefix_client(url, client):
+    stream = YouTube(url, client=client).streams.get_highest_resolution()
     if stream is None:
         raise RuntimeError('pytubefix did not find a downloadable video stream')
 
     buffer = BytesIO()
     stream.stream_to_buffer(buffer)
     return buffer.getvalue()
+
+
+def _get_youtube_video_with_pytubefix(url):
+    attempts = max(1, YOUTUBE_PYTUBEFIX_ATTEMPTS)
+    last_error = None
+    for attempt in range(attempts):
+        client = PYTUBEFIX_CLIENTS[attempt % len(PYTUBEFIX_CLIENTS)]
+        try:
+            return _download_with_pytubefix_client(url, client)
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(min(1.5 ** attempt, 5))
+
+    raise RuntimeError(
+        f'pytubefix failed after {attempts} attempts: {last_error}'
+    ) from last_error
 
 
 def _get_youtube_video_with_yt_dlp(url):
