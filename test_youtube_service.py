@@ -46,7 +46,7 @@ class YouTubeDownloadTests(unittest.TestCase):
         self.assertEqual(result, b'video')
         youtube.assert_called_once_with(
             'https://www.youtube.com/shorts/video-id',
-            client='ANDROID_VR',
+            client='MWEB',
         )
         stream.stream_to_buffer.assert_called_once()
 
@@ -64,7 +64,7 @@ class YouTubeDownloadTests(unittest.TestCase):
         self.assertEqual(result, b'video')
         self.assertEqual(
             [call.args for call in download.call_args_list],
-            [(url, 'ANDROID_VR'), (url, 'WEB'), (url, 'ANDROID_VR')],
+            [(url, 'MWEB'), (url, 'ANDROID_VR'), (url, 'MWEB')],
         )
         self.assertEqual(sleep.call_count, 2)
 

@@ -40,7 +40,7 @@ def _get_ydl_options():
     return options
 
 
-PYTUBEFIX_CLIENTS = ('ANDROID_VR', 'WEB')
+PYTUBEFIX_CLIENTS = ('MWEB', 'ANDROID_VR')
 
 
 def _download_with_pytubefix_client(url, client):
