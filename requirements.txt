@@ -1,6 +1,7 @@
 pyktok
-pytubefix
+pytubefix>=11.2.0
+nodejs-wheel-binaries>=24.19.0
 python-telegram-bot
 python-dotenv
 instaloader
-yt-dlp[default,curl-cffi]
+yt-dlp[default,curl-cffi]>=2026.8.19

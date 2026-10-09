@@ -1,20 +1,23 @@
 import unittest
+import os
 from unittest.mock import MagicMock, patch
 
 import youtube_service
 
 
 class YouTubeOptionsTests(unittest.TestCase):
+    @patch('youtube_service._get_node_runtime_options', return_value={})
     @patch('youtube_service.YOUTUBE_COOKIES_FILE', None)
-    def test_does_not_use_cookies_when_not_configured(self):
+    def test_does_not_use_cookies_when_not_configured(self, runtime):
         options = youtube_service._get_ydl_options()
 
         self.assertNotIn('cookiefile', options)
         self.assertEqual(options['js_runtimes'], {'node': {}})
 
+    @patch('youtube_service._get_node_runtime_options', return_value={'path': '/bundled/node'})
     @patch('youtube_service.os.path.isfile', return_value=True)
     @patch('youtube_service.YOUTUBE_COOKIES_FILE', '/run/secrets/youtube-cookies.txt')
-    def test_uses_configured_cookie_file(self, isfile):
+    def test_uses_configured_cookie_file(self, isfile, runtime):
         options = youtube_service._get_ydl_options()
 
         self.assertEqual(
@@ -22,14 +25,38 @@ class YouTubeOptionsTests(unittest.TestCase):
             '/run/secrets/youtube-cookies.txt',
         )
         isfile.assert_called_once_with('/run/secrets/youtube-cookies.txt')
+        self.assertEqual(options['js_runtimes'], {'node': {'path': '/bundled/node'}})
 
+    @patch('youtube_service._get_node_runtime_options', return_value={})
     @patch('youtube_service.os.path.isfile', return_value=False)
     @patch('youtube_service.YOUTUBE_COOKIES_FILE', '/missing/youtube-cookies.txt')
-    def test_rejects_missing_cookie_file(self, isfile):
+    def test_rejects_missing_cookie_file(self, isfile, runtime):
         with self.assertRaisesRegex(FileNotFoundError, 'YouTube cookies file not found'):
             youtube_service._get_ydl_options()
 
         isfile.assert_called_once_with('/missing/youtube-cookies.txt')
+
+
+class NodeRuntimeTests(unittest.TestCase):
+    @patch('youtube_service.os.path.isfile', return_value=True)
+    @patch('youtube_service.os.name', 'posix')
+    @patch('youtube_service.nodejs_wheel.__file__', '/packages/nodejs_wheel/__init__.py')
+    def test_prefers_bundled_node_on_linux(self, isfile):
+        executable = os.path.join('/packages/nodejs_wheel', 'bin', 'node')
+        self.assertEqual(youtube_service._get_node_runtime_options(), {'path': executable})
+        isfile.assert_called_once_with(executable)
+
+    @patch('youtube_service.os.path.isfile', return_value=True)
+    @patch('youtube_service.os.name', 'nt')
+    @patch('youtube_service.nodejs_wheel.__file__', 'C:/packages/nodejs_wheel/__init__.py')
+    def test_prefers_bundled_node_on_windows(self, isfile):
+        executable = os.path.join('C:/packages/nodejs_wheel', 'node.exe')
+        self.assertEqual(youtube_service._get_node_runtime_options(), {'path': executable})
+        isfile.assert_called_once_with(executable)
+
+    @patch('youtube_service.os.path.isfile', return_value=False)
+    def test_falls_back_to_path_if_bundled_executable_is_missing(self, isfile):
+        self.assertEqual(youtube_service._get_node_runtime_options(), {})
 
 
 class YouTubeDownloadTests(unittest.TestCase):

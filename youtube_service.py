@@ -3,6 +3,7 @@ import os
 import re
 import time
 
+import nodejs_wheel
 import yt_dlp
 from pytubefix import YouTube
 
@@ -16,6 +17,19 @@ from settings import (
 from silent_logging import YT_DLP_LOGGER
 
 
+def _get_node_runtime_options():
+    # The system Node may be too old for yt-dlp's YouTube challenge solver.
+    root = os.path.dirname(nodejs_wheel.__file__)
+    executable = (
+        os.path.join(root, 'node.exe')
+        if os.name == 'nt'
+        else os.path.join(root, 'bin', 'node')
+    )
+    if os.path.isfile(executable):
+        return {'path': executable}
+    return {}
+
+
 def _get_ydl_options():
     options = {
         'format': 'bestvideo+bestaudio/best',
@@ -27,7 +41,7 @@ def _get_ydl_options():
         'retries': YT_DLP_RETRIES,
         'fragment_retries': YT_DLP_FRAGMENT_RETRIES,
         'socket_timeout': YT_DLP_SOCKET_TIMEOUT,
-        'js_runtimes': {'node': {}},
+        'js_runtimes': {'node': _get_node_runtime_options()},
     }
 
     if YOUTUBE_COOKIES_FILE:
