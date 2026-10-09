@@ -1,6 +1,7 @@
 from io import BytesIO
 import os
 import re
+import tempfile
 import time
 
 import nodejs_wheel
@@ -55,6 +56,10 @@ def _get_ydl_options():
 
 
 PYTUBEFIX_CLIENTS = ('MWEB', 'ANDROID_VR')
+YOUTUBE_HLS_FORMAT = (
+    'bv[protocol^=m3u8][vcodec^=avc1][height<=1280]+ba[protocol^=m3u8]'
+    '/b[protocol^=m3u8][height<=1280]'
+)
 
 
 def _download_with_pytubefix_client(url, client):
@@ -84,21 +89,33 @@ def _get_youtube_video_with_pytubefix(url):
     ) from last_error
 
 
+def _download_with_yt_dlp_options(url, options):
+    # Isolate partial files and simultaneous requests, including HLS fallback.
+    with tempfile.TemporaryDirectory(prefix='youtube-') as directory:
+        options = dict(options, outtmpl=os.path.join(directory, '%(id)s.%(ext)s'))
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info_dict)
+        with open(filename, 'rb') as video:
+            return video.read()
+
+
 def _get_youtube_video_with_yt_dlp(url):
-    ydl_opts = _get_ydl_options()
+    options = _get_ydl_options()
+    try:
+        return _download_with_yt_dlp_options(url, options)
+    except yt_dlp.utils.DownloadError as exc:
+        if not re.search(r'\b403\b', str(exc)):
+            raise
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
-        video_id = info_dict.get("id", None)
-        video_ext = info_dict.get("ext", None)
-        filename = f"{video_id}.{video_ext}"
-
-    with open(filename, 'rb') as f:
-        video_bytes = f.read()
-    
-    os.remove(filename)
-
-    return video_bytes
+    # HLS can remain available when direct Google Video URLs reject playback.
+    hls_options = dict(
+        options,
+        format=YOUTUBE_HLS_FORMAT,
+        merge_output_format='mp4',
+        skip_unavailable_fragments=False,
+    )
+    return _download_with_yt_dlp_options(url, hls_options)
 
 
 def get_youtube_video(url):

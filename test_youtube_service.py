@@ -1,6 +1,6 @@
-import unittest
 import os
-from unittest.mock import MagicMock, patch
+import unittest
+from unittest.mock import MagicMock, mock_open, patch
 
 import youtube_service
 
@@ -60,6 +60,46 @@ class NodeRuntimeTests(unittest.TestCase):
 
 
 class YouTubeDownloadTests(unittest.TestCase):
+    @patch('youtube_service._get_ydl_options', return_value={'format': 'best'})
+    @patch('youtube_service._download_with_yt_dlp_options')
+    def test_retries_403_with_hls(self, download, options):
+        download.side_effect = [
+            youtube_service.yt_dlp.utils.DownloadError('HTTP Error 403: Forbidden'),
+            b'hls-video',
+        ]
+        result = youtube_service._get_youtube_video_with_yt_dlp('url')
+        self.assertEqual(result, b'hls-video')
+        self.assertEqual(download.call_count, 2)
+        fallback_options = download.call_args.args[1]
+        self.assertEqual(fallback_options['format'], youtube_service.YOUTUBE_HLS_FORMAT)
+        self.assertEqual(fallback_options['merge_output_format'], 'mp4')
+        self.assertFalse(fallback_options['skip_unavailable_fragments'])
+
+    @patch('youtube_service._get_ydl_options', return_value={'format': 'best'})
+    @patch('youtube_service._download_with_yt_dlp_options')
+    def test_does_not_retry_unrelated_errors_with_hls(self, download, options):
+        download.side_effect = youtube_service.yt_dlp.utils.DownloadError('Video unavailable')
+        with self.assertRaises(youtube_service.yt_dlp.utils.DownloadError):
+            youtube_service._get_youtube_video_with_yt_dlp('url')
+        download.assert_called_once()
+
+    @patch('youtube_service.open', new_callable=mock_open, read_data=b'video')
+    @patch('youtube_service.yt_dlp.YoutubeDL')
+    @patch('youtube_service.tempfile.TemporaryDirectory')
+    def test_download_uses_temporary_directory_and_final_filename(self, directory, youtube_dl, video):
+        directory.return_value.__enter__.return_value = '/temporary'
+        downloader = youtube_dl.return_value.__enter__.return_value
+        downloader.extract_info.return_value = {'id': 'video', 'ext': 'mp4'}
+        downloader.prepare_filename.return_value = '/temporary/video.mp4'
+        result = youtube_service._download_with_yt_dlp_options('url', {'format': 'best'})
+        self.assertEqual(result, b'video')
+        self.assertEqual(
+            youtube_dl.call_args.args[0]['outtmpl'],
+            os.path.join('/temporary', '%(id)s.%(ext)s'),
+        )
+        video.assert_called_once_with('/temporary/video.mp4', 'rb')
+        directory.return_value.__exit__.assert_called_once()
+
     @patch('youtube_service.YouTube')
     def test_downloads_progressive_stream_with_pytubefix(self, youtube):
         stream = MagicMock()
